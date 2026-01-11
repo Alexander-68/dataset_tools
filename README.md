@@ -20,6 +20,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   YOLO pose keypoints, with optional resize/rotate/debug.
 - `extend_flip_yolo.py`: Extend images with a flipped duplicate and update
   bounding boxes/keypoints.
+- `extract_tfrecord_images.py`: Extract JPEG images from TFRecord files with
+  progress and stats.
 - `merge_datasets.py`: Merge multiple datasets into a unified train/val layout
   and update `dataset.yaml` counts.
 - `merge_pose_results.py`: Merge body and face pose labels, refining face points.
