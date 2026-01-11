@@ -4,6 +4,8 @@ import argparse
 import math
 import random
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -44,7 +46,7 @@ def list_images(source_dir: Path) -> list[Path]:
     )
 
 
-def render_progress(current: int, total: int, name: str) -> None:
+def render_progress(current: int, total: int, name: str, start_time: float) -> None:
     if total <= 0:
         return
     bar_width = 30
@@ -54,7 +56,18 @@ def render_progress(current: int, total: int, name: str) -> None:
     tail = name
     if len(tail) > 40:
         tail = f"...{tail[-37:]}"
-    sys.stdout.write(f"\r[{bar}] {current}/{total} {percent:3d}% {tail}   ")
+    eta_label = "ETA --:--"
+    if current > 0:
+        elapsed = time.monotonic() - start_time
+        if elapsed > 0:
+            rate = current / elapsed
+            if rate > 0:
+                remaining = max(0.0, (total - current) / rate)
+                eta_time = datetime.now() + timedelta(seconds=remaining)
+                eta_label = f"ETA {eta_time.strftime('%H:%M')}"
+    sys.stdout.write(
+        f"\r[{bar}] {current}/{total} {percent:3d}% {eta_label} {tail}   "
+    )
     sys.stdout.flush()
 
 
@@ -270,6 +283,7 @@ def crop_portraits(
     no_pose = 0
     skipped = 0
 
+    start_time = time.monotonic()
     for index, image_path in enumerate(files, start=1):
         try:
             with Image.open(image_path) as img:
@@ -284,13 +298,13 @@ def crop_portraits(
                 if person_count == 0:
                     no_pose += 1
                     processed += 1
-                    render_progress(index, total_files, image_path.name)
+                    render_progress(index, total_files, image_path.name, start_time)
                     continue
                 candidates = get_person_candidates(result)
                 if not candidates:
                     no_pose += 1
                     processed += 1
-                    render_progress(index, total_files, image_path.name)
+                    render_progress(index, total_files, image_path.name, start_time)
                     continue
                 primary = candidates[0]
                 image_area = width * height
@@ -355,7 +369,7 @@ def crop_portraits(
                 if crop_box is None:
                     skipped += 1
                     processed += 1
-                    render_progress(index, total_files, image_path.name)
+                    render_progress(index, total_files, image_path.name, start_time)
                     continue
                 if debug_draw:
                     draw = ImageDraw.Draw(img)
@@ -391,7 +405,7 @@ def crop_portraits(
         except (UnidentifiedImageError, OSError):
             skipped += 1
         finally:
-            render_progress(index, total_files, image_path.name)
+            render_progress(index, total_files, image_path.name, start_time)
 
     if total_files:
         print()

@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import sys
+import time
+from datetime import datetime, timedelta
 from typing import Optional
 import warnings
 
@@ -36,6 +39,37 @@ def resolve_model_path(model_url: str, script_dir: Path) -> str:
 
 def format_float(value: float) -> str:
     return f"{value:.6f}"
+
+
+def format_eta(start_time: float, current: int, total: int) -> str:
+    if total <= 0 or current <= 0:
+        return "ETA --:--"
+    elapsed = time.monotonic() - start_time
+    if elapsed <= 0:
+        return "ETA --:--"
+    rate = current / elapsed
+    if rate <= 0:
+        return "ETA --:--"
+    remaining = max(0.0, (total - current) / rate)
+    eta_time = datetime.now() + timedelta(seconds=remaining)
+    return f"ETA {eta_time.strftime('%H:%M')}"
+
+
+def render_progress(current: int, total: int, label: str, start_time: float) -> None:
+    if total <= 0:
+        return
+    bar_width = 30
+    filled = int(bar_width * current / total)
+    bar = "#" * filled + "-" * (bar_width - filled)
+    percent = int(100 * current / total)
+    tail = label
+    if len(tail) > 40:
+        tail = f"...{tail[-37:]}"
+    eta_label = format_eta(start_time, current, total)
+    sys.stdout.write(
+        f"\r[{bar}] {current}/{total} {percent:3d}% {eta_label} {tail}   "
+    )
+    sys.stdout.flush()
 
 
 @dataclass
@@ -500,11 +534,12 @@ def annotate_images(
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     ]
 
-    iterator = image_paths
-    if tqdm is not None:
-        iterator = tqdm(image_paths, desc="Annotating", unit="image")
+    total_images = len(image_paths)
+    start_time = time.monotonic()
+    use_tqdm = tqdm is not None
+    bar = tqdm(total=total_images, desc="Annotating", unit="image") if use_tqdm else None
 
-    for image_path in iterator:
+    for index, image_path in enumerate(image_paths, start=1):
         with Image.open(image_path) as image:
             image = image.convert("RGB")
             flipped = ImageOps.mirror(image)
@@ -531,6 +566,16 @@ def annotate_images(
         merged_pose = merge_pose(normal_pose, flipped_pose)
         output_path = labels_dir / f"{image_path.stem}.txt"
         write_pose_labels(output_path, merged_pose, kp_conf)
+        if bar is not None:
+            bar.set_postfix_str(format_eta(start_time, index, total_images))
+            bar.update(1)
+        else:
+            render_progress(index, total_images, image_path.name, start_time)
+
+    if bar is not None:
+        bar.close()
+    elif total_images:
+        print()
 
     print(f"Annotated {len(image_paths)} images. Labels saved to {labels_dir}.")
 

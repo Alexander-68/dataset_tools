@@ -14,6 +14,8 @@ assignment. The cost combines confidence-weighted keypoint distance (when
 available), box center distance, and box IoU; pairs above the match threshold
 are left unmatched and kept as-is.
 
+Progress output includes an ETA clock time when available.
+
 ## Functions
 
 `annotate_images(root, model_url="yolo11x-pose.pt", img_size=640, conf=0.3, kp_conf=0.4, labels_dir_name="labels")`

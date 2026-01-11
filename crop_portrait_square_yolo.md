@@ -20,7 +20,7 @@ the face keypoints (nose, eyes, ears) detected by a YOLO pose model.
 - **Debug overlay:** Draw a white face circle before cropping.
 - **Rotation:** Optional random clockwise rotation before cropping.
 - **EXIF orientation:** Respects EXIF rotation via auto-transpose.
-- **Progress + stats:** Shows a progress bar and final summary.
+- **Progress + stats:** Shows a progress bar (with ETA) and final summary.
 
 ## Usage
 
@@ -41,8 +41,8 @@ python crop_portrait_square_yolo.py [OPTIONS]
 
 ### Output
 
-The script prints a progress bar while processing and a summary of how many
-images were cropped, skipped, or had no pose detected.
+The script prints a progress bar with an ETA clock time while processing and a
+summary of how many images were cropped, skipped, or had no pose detected.
 
 ## Paths
 
