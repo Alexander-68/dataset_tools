@@ -27,14 +27,16 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   labels.
 - `mosaic_yolo.py`: Build multi-image mosaics with optional flip/rotate and
   merged labels.
-- `resize_images.py`: Resize images (and optionally convert HEIC) with progress 
+- `resize_images.py`: Resize images (and optionally convert HEIC) with progress
   and stats.
 - `rename_images_labels.py`: Rename images with matching labels using a pattern
   and update label filenames.
-- `rotate_head_tilt_yolo.py`: Rotate portraits based on head tilt and update    
+- `rotate_head_tilt_yolo.py`: Rotate portraits based on head tilt and update
   pose labels.
 - `rotate_images_labels.py`: Rotate images to fixed angles and update labels,
   supporting YOLO detection and pose.
+- `visualize-pose.py`: Overlay YOLO pose keypoints and boxes onto images for
+  quick inspection.
 
 ## Docs
 
