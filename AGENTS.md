@@ -2,7 +2,7 @@ This folder contains python scripts to help vision AI dataset preparation. Typic
 
 
 
-When creating or updating a python script, also maintain its .md description file.
+When creating or updating a python script, also maintain its .md description file. Include new scripts into README.md file.
 
 
 
@@ -15,6 +15,5 @@ Python script distinguishes between Current Working Directory (typically contain
 
 
 By default, YOLO pose format contains 17 keypoints; see file dataset.yaml for the shape, names, flip ids.
-
 
 
