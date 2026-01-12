@@ -7,7 +7,7 @@ randomizes the input list once at startup, and writes mosaics to
 `images_mosaic` and `labels_mosaic` by default. Progress is displayed with a
 terminal progress bar.
 
-<p float="left">
+<p align="center">
   <img width="45%" hspace="10" alt="mosaic_ex" src="https://github.com/user-attachments/assets/9db1bd5a-0827-4fb2-b4c9-931d8ef8e7d0" />
   <img width="45%" hspace="10" alt="mosaic_ex2" src="https://github.com/user-attachments/assets/f0bc0501-c471-4654-ba3e-91cf14a1ed59" />
 </p>
