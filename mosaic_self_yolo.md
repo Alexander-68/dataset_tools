@@ -6,6 +6,8 @@ reads images from `images` and labels from `labels` under the current working
 directory (CWD), and writes mosaics to `images_mosaic` and `labels_mosaic` by
 default. Output file names use the `--prefix` value (default `s_`).
 
+<img width="643" height="473" alt="mosaic_self" src="https://github.com/user-attachments/assets/9e85ddaa-2afe-4743-a666-0475cb9d3d27" />
+
 ## Layout rules
 
 - Landscape (width > height): canvas is `width x (height + width * mosaic_scale)`.
