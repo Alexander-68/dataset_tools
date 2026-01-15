@@ -18,6 +18,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   coordinates when invisible.
 - `crop_portrait_square_yolo.py`: Face-centered square crops of portraits using
   YOLO pose keypoints, with optional resize/rotate/debug.
+- `download_google_images.py`: Download full-resolution images from a Google
+  Images search URL, save as JPEGs, and optionally resize.
 - `extend_flip_yolo.py`: Extend images with a flipped duplicate and update
   bounding boxes/keypoints.
 - `extract_tfrecord_images.py`: Extract JPEG images from TFRecord files with
