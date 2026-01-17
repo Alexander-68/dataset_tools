@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import html
 import re
 import sys
 import time
+import warnings
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
@@ -37,7 +39,7 @@ def render_progress(current: int, total: int, eta: str, name: str) -> None:
     filled = int(bar_width * current / total)
     bar = "#" * filled + "-" * (bar_width - filled)
     percent = int(100 * current / total)
-    tail = name
+    tail = name.encode("ascii", "replace").decode("ascii")
     if len(tail) > 40:
         tail = f"...{tail[-37:]}"
     sys.stdout.write(
@@ -113,6 +115,134 @@ def extract_image_urls(html: str) -> list[str]:
     return unique
 
 
+def extract_yandex_image_urls(html_text: str) -> list[str]:
+    text = html.unescape(html_text)
+    patterns = [
+        r'"img_url"\s*:\s*"([^"]+)"',
+        r"img_url=([^&\"'<>]+)",
+    ]
+    found: list[str] = []
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            url = clean_url(match)
+            if not url.startswith(("http://", "https://")):
+                continue
+            if is_thumbnail_url(url):
+                continue
+            found.append(url)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in found:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique.append(url)
+    return unique
+
+
+def extract_yandex_result_urls(html_text: str) -> list[str]:
+    text = html.unescape(html_text)
+    found: list[str] = []
+    for match in re.findall(r'"img_href"\s*:\s*"([^"]+)"', text):
+        url = clean_url(match)
+        if not url.startswith(("http://", "https://")):
+            continue
+        found.append(url)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in found:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique.append(url)
+    return unique
+
+
+def parse_page_index(url: str) -> int | None:
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    for key in ("p", "page", "pn"):
+        value = params.get(key)
+        if value:
+            try:
+                return int(value[0])
+            except ValueError:
+                return None
+    return None
+
+
+def extract_yandex_next_url(html_text: str, base_url: str, current_page: int) -> str | None:
+    text = html.unescape(html_text)
+    candidates: list[str] = []
+    patterns = [
+        r'"moreURL"\s*:\s*"([^"]+)"',
+        r'"moreUrl"\s*:\s*"([^"]+)"',
+        r'"more_url"\s*:\s*"([^"]+)"',
+        r'"nextPage"\s*:\s*"([^"]+)"',
+        r'"next"\s*:\s*"([^"]+)"',
+        r'"url"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            url = clean_url(match)
+            url = urljoin(base_url, url)
+            if "/images/search" not in url:
+                continue
+            if "img_url=" in url:
+                continue
+            if "text=" not in url:
+                continue
+            candidates.append(url)
+
+    for match in re.findall(r"/images/search\\?[^\"'<>\\s]+", text):
+        url = clean_url(match)
+        url = urljoin(base_url, url)
+        if "img_url=" in url:
+            continue
+        if "text=" not in url:
+            continue
+        if "p=" not in url and "page=" not in url:
+            continue
+        candidates.append(url)
+
+    next_url = None
+    next_page = None
+    for url in candidates:
+        page = parse_page_index(url)
+        if page is None:
+            continue
+        if page <= current_page:
+            continue
+        if next_page is None or page < next_page:
+            next_page = page
+            next_url = url
+
+    return next_url
+
+
+def has_captcha_response(text: str) -> bool:
+    lowered = text.lower()
+    return "\"type\":\"captcha\"" in lowered or "\"type\": \"captcha\"" in lowered
+
+
+def build_yandex_ajax_urls(search_url: str) -> list[str]:
+    candidates = [
+        add_query_param(search_url, "ajax", "1"),
+        add_query_param(search_url, "format", "json"),
+        add_query_param(add_query_param(search_url, "format", "json"), "ajax", "1"),
+    ]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique.append(url)
+    return unique
+
+
 def is_google_domain(netloc: str) -> bool:
     return (
         netloc.endswith("google.com")
@@ -143,6 +273,15 @@ def extract_result_urls(html: str) -> list[str]:
         seen.add(url)
         unique.append(url)
     return unique
+
+
+def detect_provider(search_url: str) -> str:
+    netloc = urlparse(search_url).netloc.lower()
+    if "yandex." in netloc:
+        return "yandex"
+    if "google." in netloc:
+        return "google"
+    return "generic"
 
 
 def extract_page_image_urls(html: str, base_url: str) -> list[str]:
@@ -271,7 +410,10 @@ def fetch_search_results(
     search_url: str,
     timeout: float,
     user_agent: str,
-) -> tuple[list[str], list[str]]:
+    provider: str,
+    current_page: int,
+    yandex_captcha_warned: list[bool] | None,
+) -> tuple[list[str], list[str], str | None]:
     headers = {
         "User-Agent": user_agent,
         "Referer": search_url,
@@ -281,20 +423,62 @@ def fetch_search_results(
 
     response = session.get(search_url, headers=headers, timeout=timeout)
     response.raise_for_status()
-    if "consent.google.com" in str(response.url).lower():
+    if provider == "google" and "consent.google.com" in str(response.url).lower():
         print("Warning: Google returned a consent page. The URL may need manual access.")
 
-    image_urls = extract_image_urls(response.text)
-    result_urls = extract_result_urls(response.text)
+    next_url = None
+    if provider == "yandex":
+        image_urls = extract_yandex_image_urls(response.text)
+        result_urls = extract_yandex_result_urls(response.text)
+        next_url = extract_yandex_next_url(response.text, search_url, current_page)
+    else:
+        image_urls = extract_image_urls(response.text)
+        result_urls = extract_result_urls(response.text)
 
     if not image_urls and not result_urls:
         fallback_headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(search_url, headers=fallback_headers, timeout=timeout)
         response.raise_for_status()
-        image_urls = extract_image_urls(response.text)
-        result_urls = extract_result_urls(response.text)
+        if provider == "yandex":
+            image_urls = extract_yandex_image_urls(response.text)
+            result_urls = extract_yandex_result_urls(response.text)
+            next_url = extract_yandex_next_url(response.text, search_url, current_page)
+        else:
+            image_urls = extract_image_urls(response.text)
+            result_urls = extract_result_urls(response.text)
 
-    if not image_urls and not result_urls and "gbv=1" not in search_url:
+    if provider == "yandex" and not image_urls and not result_urls:
+        session.get("https://yandex.ru/", headers=headers, timeout=timeout)
+        response = session.get(search_url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        image_urls = extract_yandex_image_urls(response.text)
+        result_urls = extract_yandex_result_urls(response.text)
+        next_url = extract_yandex_next_url(response.text, search_url, current_page)
+
+    if provider == "yandex" and not image_urls and not result_urls:
+        for ajax_url in build_yandex_ajax_urls(search_url):
+            ajax_headers = {
+                **headers,
+                "Accept": "application/json, text/plain, */*",
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": "https://yandex.ru",
+            }
+            response = session.get(ajax_url, headers=ajax_headers, timeout=timeout)
+            response.raise_for_status()
+            if has_captcha_response(response.text):
+                if yandex_captcha_warned is not None and not yandex_captcha_warned[0]:
+                    print(
+                        "Warning: Yandex returned a captcha response for the AJAX endpoint."
+                    )
+                    yandex_captcha_warned[0] = True
+                continue
+            image_urls = extract_yandex_image_urls(response.text)
+            result_urls = extract_yandex_result_urls(response.text)
+            next_url = extract_yandex_next_url(response.text, search_url, current_page)
+            if image_urls or result_urls:
+                break
+
+    if provider == "google" and not image_urls and not result_urls and "gbv=1" not in search_url:
         fallback_headers = {"User-Agent": "Mozilla/5.0"}
         fallback_url = add_query_param(search_url, "gbv", "1")
         response = requests.get(fallback_url, headers=fallback_headers, timeout=timeout)
@@ -302,7 +486,7 @@ def fetch_search_results(
         image_urls = extract_image_urls(response.text)
         result_urls = extract_result_urls(response.text)
 
-    return image_urls, result_urls
+    return image_urls, result_urls, next_url
 
 
 def download_google_images(
@@ -319,9 +503,11 @@ def download_google_images(
     page_size: int,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    provider = detect_provider(search_url)
 
     print(
-        "Starting Google image download.\n"
+        "Starting image download.\n"
+        f"- Provider: {provider}\n"
         f"- Search URL: {search_url}\n"
         f"- Output dir: {output_dir}\n"
         f"- Target count: {count}\n"
@@ -330,7 +516,7 @@ def download_google_images(
         f"- Timeout: {timeout}s\n"
         f"- Delay: {delay}s\n"
         f"- Max pages: {'unlimited' if max_pages <= 0 else max_pages}\n"
-        f"- Page size: {page_size}"
+        f"- Page size: {page_size if provider == 'google' else 'n/a'}"
     )
 
     session = requests.Session()
@@ -361,15 +547,31 @@ def download_google_images(
         state_handle = state_path.open("a", encoding="utf-8")
 
     try:
+        yandex_captcha_warned = [False]
         page_index = 0
+        next_page_url: str | None = None
         while downloaded < count:
             if max_pages > 0 and page_index >= max_pages:
                 break
 
-            page_url = add_query_param(search_url, "start", str(page_index * page_size))
-            page_url = add_query_param(page_url, "num", str(page_size))
-            image_urls, result_urls = fetch_search_results(
-                session, page_url, timeout, user_agent
+            if provider == "yandex":
+                if next_page_url:
+                    page_url = next_page_url
+                else:
+                    page_url = add_query_param(search_url, "p", str(page_index))
+            else:
+                page_url = add_query_param(
+                    search_url, "start", str(page_index * page_size)
+                )
+                page_url = add_query_param(page_url, "num", str(page_size))
+            image_urls, result_urls, next_page_url = fetch_search_results(
+                session,
+                page_url,
+                timeout,
+                user_agent,
+                provider,
+                page_index,
+                yandex_captcha_warned if provider == "yandex" else None,
             )
             search_pages += 1
 
@@ -491,7 +693,16 @@ def download_google_images(
                 if delay > 0:
                     time.sleep(delay)
 
-            page_index += 1
+            if provider == "yandex":
+                next_page_index = (
+                    parse_page_index(next_page_url) if next_page_url else None
+                )
+                if next_page_index is None or next_page_index <= page_index:
+                    page_index += 1
+                else:
+                    page_index = next_page_index
+            else:
+                page_index += 1
     finally:
         if state_handle:
             state_handle.close()
@@ -519,12 +730,12 @@ def download_google_images(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download full-resolution images from a Google Images search URL."
+        description="Download full-resolution images from Google or Yandex Images."
     )
     parser.add_argument(
         "--url",
         required=True,
-        help="Google Images search URL to scrape.",
+        help="Google or Yandex Images search URL to scrape.",
     )
     parser.add_argument(
         "--count",
@@ -580,7 +791,7 @@ def main() -> None:
         "--page-size",
         type=int,
         default=20,
-        help="Number of results per page for pagination. Default: 20",
+        help="Number of results per page for pagination (Google only). Default: 20",
     )
     parser.add_argument(
         "--state-file",
@@ -618,6 +829,8 @@ def main() -> None:
 
     if args.count <= 0:
         raise ValueError("--count must be greater than zero.")
+
+    warnings.filterwarnings("ignore", category=UserWarning, module="PIL")
 
     download_google_images(
         search_url=args.url,
