@@ -16,6 +16,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
 - `cleanup_labels.py`: Move label files without matching images into `labels-x`.
 - `correct_keypoints.py`: Normalize person keypoint visibility flags and zero
   coordinates when invisible.
+- `correct_face_keypoints.py`: Merge improved face keypoints into pose labels
+  with weighted blending and deviation stats.
 - `crop_portrait_square_yolo.py`: Face-centered square crops of portraits using
   YOLO pose keypoints, with optional resize/rotate/debug.
 - `download_google_images.py`: Download full-resolution images from Google or
