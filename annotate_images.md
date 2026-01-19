@@ -18,7 +18,7 @@ Progress output includes an ETA clock time when available.
 
 ## Functions
 
-`annotate_images(root, model_url="yolo11x-pose.pt", img_size=640, conf=0.3, kp_conf=0.4, labels_dir_name="labels")`
+`annotate_images(root, model_url="yolo11x-pose.pt", img_size=640, conf=0.3, kp_conf=0.4, iou=None, labels_dir_name="labels")`
 
 - `root`: Data root (CWD) containing `images` and `labels` folders.
 - `model_url`: YOLO pose model path or URL. Relative paths resolve from the
@@ -28,6 +28,8 @@ Progress output includes an ETA clock time when available.
 - `kp_conf`: Keypoint confidence threshold. If a keypoint confidence is below
   this value, its visibility is written as `0` and its `x`/`y` coordinates are
   written as `0.0`. Otherwise, visibility is written as `2`.
+- `iou`: IoU threshold passed to `model.predict` for NMS. When `None`, the
+  model default is used.
 - `labels_dir_name`: Output folder name for labels inside `root`.
 
 `write_pose_labels(output_path, pose, kp_conf)`
@@ -50,5 +52,5 @@ python annotate_images.py
 ```
 
 ```bash
-python annotate_images.py --model yolo11x-pose.pt --img-size 640 --conf 0.3 --kp-conf 0.4 --labels labels
+python annotate_images.py --model yolo11x-pose.pt --img-size 640 --conf 0.3 --kp-conf 0.4 --iou 0.7 --labels labels
 ```

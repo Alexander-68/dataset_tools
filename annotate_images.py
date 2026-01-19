@@ -505,6 +505,7 @@ def annotate_images(
     img_size: int = 640,
     conf: float = 0.3,
     kp_conf: float = 0.4,
+    iou: Optional[float] = None,
     labels_dir_name: str = "labels",
     script_dir: Optional[Path] = None,
 ) -> None:
@@ -514,8 +515,9 @@ def annotate_images(
     ]
     if script_dir is not None:
         header_lines.append(f"- Script dir: {script_dir}")
+    iou_label = "default" if iou is None else iou
     header_lines.append(
-        f"- model={model_url}, img_size={img_size}, conf={conf}, kp_conf={kp_conf}"
+        f"- model={model_url}, img_size={img_size}, conf={conf}, kp_conf={kp_conf}, iou={iou_label}"
     )
     header_lines.append(f"- labels={labels_dir_name}")
     print("\n".join(header_lines))
@@ -544,20 +546,18 @@ def annotate_images(
             image = image.convert("RGB")
             flipped = ImageOps.mirror(image)
 
-            normal_results = model.predict(
-                source=image,
-                save=False,
-                verbose=False,
-                imgsz=img_size,
-                conf=conf,
-            )
-            flipped_results = model.predict(
-                source=flipped,
-                save=False,
-                verbose=False,
-                imgsz=img_size,
-                conf=conf,
-            )
+            predict_kwargs = {
+                "source": image,
+                "save": False,
+                "verbose": False,
+                "imgsz": img_size,
+                "conf": conf,
+            }
+            if iou is not None:
+                predict_kwargs["iou"] = iou
+            normal_results = model.predict(**predict_kwargs)
+            predict_kwargs["source"] = flipped
+            flipped_results = model.predict(**predict_kwargs)
 
         normal_pose = extract_pose(normal_results[0]) if normal_results else None
         flipped_pose = extract_pose(flipped_results[0]) if flipped_results else None
@@ -612,6 +612,13 @@ if __name__ == "__main__":
         help="Keypoint confidence threshold for visibility and masking.",       
     )
     parser.add_argument(
+        "--iou",
+        dest="iou",
+        type=float,
+        default=None,
+        help="IoU threshold for NMS; omit to use the model default.",
+    )
+    parser.add_argument(
         "--labels",
         dest="labels_dir_name",
         default="labels",
@@ -627,6 +634,7 @@ if __name__ == "__main__":
         img_size=args.img_size,
         conf=args.conf,
         kp_conf=args.kp_conf,
+        iou=args.iou,
         labels_dir_name=args.labels_dir_name,
         script_dir=script_dir,
     )
