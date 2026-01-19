@@ -12,7 +12,7 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
 ## Tools
 
 - `annotate_images.py`: Run a YOLO pose model on images and write pose labels,
-  merging normal and flipped predictions.
+  with optional flipped inference.
 - `cleanup_labels.py`: Move label files without matching images into `labels-x`.
 - `correct_keypoints.py`: Normalize person keypoint visibility flags and zero
   coordinates when invisible.

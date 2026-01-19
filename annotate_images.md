@@ -3,11 +3,12 @@
 Runs a YOLO pose model on images and writes YOLO-format pose labels. Images are
 loaded from `images` and labels are written to `labels` under the current
 working directory (CWD). Model paths are treated as URLs when they contain
-`://`; otherwise relative paths are resolved from the script directory. Each
-image is inferred twice (normal and left-right flipped). The
-flipped results are mapped back to the original coordinate system, left/right
-keypoints are swapped using the flip index map, and keypoint positions are
-merged with confidence-weighted averaging before thresholding and formatting.
+`://`; otherwise relative paths are resolved from the script directory. By
+default, each image is inferred once (normal). When `--flip` is enabled, each
+image is inferred twice (normal and left-right flipped). The flipped results
+are mapped back to the original coordinate system, left/right keypoints are
+swapped using the flip index map, and keypoint positions are merged with
+confidence-weighted averaging before thresholding and formatting.
 
 Objects are matched across normal and flipped predictions using a minimal-cost
 assignment. The cost combines confidence-weighted keypoint distance (when
@@ -18,7 +19,7 @@ Progress output includes an ETA clock time when available.
 
 ## Functions
 
-`annotate_images(root, model_url="yolo11x-pose.pt", img_size=640, conf=0.3, kp_conf=0.4, iou=None, labels_dir_name="labels")`
+`annotate_images(root, model_url="yolo11x-pose.pt", img_size=640, conf=0.3, kp_conf=0.4, iou=None, labels_dir_name="labels", flip=False)`
 
 - `root`: Data root (CWD) containing `images` and `labels` folders.
 - `model_url`: YOLO pose model path or URL. Relative paths resolve from the
@@ -31,11 +32,12 @@ Progress output includes an ETA clock time when available.
 - `iou`: IoU threshold passed to `model.predict` for NMS. When `None`, the
   model default is used.
 - `labels_dir_name`: Output folder name for labels inside `root`.
+- `flip`: When `True`, run flipped inference and merge results.
 
 `write_pose_labels(output_path, pose, kp_conf)`
 
 - `output_path`: Path to the output label file.
-- `pose`: Merged pose data produced from the normal + flipped inferences.
+- `pose`: Pose data produced from the normal (or merged normal + flipped) inference.
 - `kp_conf`: Keypoint confidence threshold used to set visibility and zero
   low-confidence coordinates.
 
@@ -53,4 +55,8 @@ python annotate_images.py
 
 ```bash
 python annotate_images.py --model yolo11x-pose.pt --img-size 640 --conf 0.3 --kp-conf 0.4 --iou 0.7 --labels labels
+```
+
+```bash
+python annotate_images.py --flip
 ```

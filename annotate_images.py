@@ -507,17 +507,16 @@ def annotate_images(
     kp_conf: float = 0.4,
     iou: Optional[float] = None,
     labels_dir_name: str = "labels",
+    flip: bool = False,
     script_dir: Optional[Path] = None,
 ) -> None:
-    header_lines = [
-        "Annotating images with normal + flipped inference.",
-        f"- Data root (CWD): {root}",
-    ]
+    mode_label = "normal + flipped" if flip else "normal"
+    header_lines = [f"Annotating images with {mode_label} inference.", f"- Data root (CWD): {root}"]
     if script_dir is not None:
         header_lines.append(f"- Script dir: {script_dir}")
     iou_label = "default" if iou is None else iou
     header_lines.append(
-        f"- model={model_url}, img_size={img_size}, conf={conf}, kp_conf={kp_conf}, iou={iou_label}"
+        f"- model={model_url}, img_size={img_size}, conf={conf}, kp_conf={kp_conf}, iou={iou_label}, flip={flip}"
     )
     header_lines.append(f"- labels={labels_dir_name}")
     print("\n".join(header_lines))
@@ -544,7 +543,6 @@ def annotate_images(
     for index, image_path in enumerate(image_paths, start=1):
         with Image.open(image_path) as image:
             image = image.convert("RGB")
-            flipped = ImageOps.mirror(image)
 
             predict_kwargs = {
                 "source": image,
@@ -556,13 +554,18 @@ def annotate_images(
             if iou is not None:
                 predict_kwargs["iou"] = iou
             normal_results = model.predict(**predict_kwargs)
-            predict_kwargs["source"] = flipped
-            flipped_results = model.predict(**predict_kwargs)
+            flipped_results = None
+            if flip:
+                flipped = ImageOps.mirror(image)
+                predict_kwargs["source"] = flipped
+                flipped_results = model.predict(**predict_kwargs)
 
         normal_pose = extract_pose(normal_results[0]) if normal_results else None
-        flipped_pose = extract_pose(flipped_results[0]) if flipped_results else None
-        if flipped_pose is not None:
-            flipped_pose = align_flipped_pose(flipped_pose, FLIP_IDX)
+        flipped_pose = None
+        if flip and flipped_results:
+            flipped_pose = extract_pose(flipped_results[0])
+            if flipped_pose is not None:
+                flipped_pose = align_flipped_pose(flipped_pose, FLIP_IDX)
         merged_pose = merge_pose(normal_pose, flipped_pose)
         output_path = labels_dir / f"{image_path.stem}.txt"
         write_pose_labels(output_path, merged_pose, kp_conf)
@@ -624,6 +627,11 @@ if __name__ == "__main__":
         default="labels",
         help="Labels output folder name inside the root directory.",
     )
+    parser.add_argument(
+        "--flip",
+        action="store_true",
+        help="Run left-right flipped inference and merge results.",
+    )
     args = parser.parse_args()
     cwd = Path.cwd()
     script_dir = Path(__file__).resolve().parent
@@ -636,5 +644,6 @@ if __name__ == "__main__":
         kp_conf=args.kp_conf,
         iou=args.iou,
         labels_dir_name=args.labels_dir_name,
+        flip=args.flip,
         script_dir=script_dir,
     )
