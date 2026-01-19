@@ -8,19 +8,27 @@ ratios. It writes cropped JPEG images plus updated labels to new folders.
 
 - **Annotation-aware crop:** Uses all bounding boxes and visible keypoints to
   build the enclosing rectangle.
+- **Ignore tiny boxes:** Objects with a bbox min side under 24 pixels are
+  excluded from crop calculations (and their keypoints are ignored).
 - **Padding with border clamp:** Adds configurable padding (default 20%), but
   clamps at image borders when needed.
+- **Padding fallback:** If a padded crop can't fit a ratio, it retries without
+  padding.
 - **Aspect ratio search:** Tries 1:1 first; if that fails, tries the largest
   possible square without padding, then 1:2/2:1, 3:4/4:3, and 2:3/3:2.
 - **Pair selection:** When both ratios in a pair fit, picks the smaller-area crop.
 - **Even sizing:** 1:1, 1:2, and 2:1 crops are normalized to exact, even pixel
   dimensions.
+- **Numeric tolerance:** Uses a tiny epsilon when fitting crops to avoid float
+  edge-case rejects.
 - **Fallback to original:** If no ratio fits, keeps the original image.
 - **Prefix by ratio:** Output files get `11_`, `34_`, `43_`, `23_`, `32_`,
   `12_`, `21_`, or `ff_` for non-matching/no-crop cases.
 - **Skip empty labels:** If a label file exists but contains no annotations, the
   image and label are not copied.
 - **Max dimension:** Resizes output so the longest side is <= `--max-dim`.
+- **Skip tiny outputs:** Drops result images and labels if the longest side is
+  under 160 pixels.
 - **Progress + stats:** Shows a progress bar with ETA and a final summary.
 
 ## Usage

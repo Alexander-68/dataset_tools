@@ -12,6 +12,8 @@ from typing import Iterable, List, Optional, Tuple
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+MIN_OUTPUT_DIM = 160
+MIN_BBOX_DIM = 24
 
 PREFIX_BY_RATIO = {
     (1, 1): "11_",
@@ -157,6 +159,8 @@ def collect_geometry(
         abs_cy = cy * height
         abs_w = bw * width
         abs_h = bh * height
+        if min(abs_w, abs_h) < MIN_BBOX_DIM:
+            continue
         x1 = abs_cx - abs_w / 2.0
         y1 = abs_cy - abs_h / 2.0
         x2 = abs_cx + abs_w / 2.0
@@ -227,6 +231,7 @@ def fit_crop(
     target_w: float,
     target_h: float,
 ) -> Optional[Tuple[int, int, int, int]]:
+    eps = 1e-6
     if target_w <= 0 or target_h <= 0:
         return None
     if target_w > img_w or target_h > img_h:
@@ -238,6 +243,11 @@ def fit_crop(
     left_max = min(min_x, img_w - target_w)
     top_min = max(0.0, max_y - target_h)
     top_max = min(min_y, img_h - target_h)
+
+    if left_min > left_max and left_min - left_max <= eps:
+        left_min = left_max
+    if top_min > top_max and top_min - top_max <= eps:
+        top_min = top_max
 
     if left_min > left_max or top_min > top_max:
         return None
@@ -344,6 +354,25 @@ def pick_crop(
     img_w: int,
     img_h: int,
 ) -> Tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple[int, int]]]:
+    def pick_ratio_crop(
+        source_rect: Tuple[float, float, float, float]
+    ) -> Tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple[int, int]]]:
+        ratio_pairs = [
+            [(1, 2), (2, 1)],
+            [(3, 4), (4, 3)],
+            [(2, 3), (3, 2)],
+        ]
+        for pair in ratio_pairs:
+            candidates: List[Tuple[Tuple[int, int, int, int], Tuple[int, int]]] = []
+            for ratio in pair:
+                crop = fit_ratio_crop(source_rect, img_w, img_h, ratio[0], ratio[1])
+                if crop:
+                    candidates.append((crop, ratio))
+            if candidates:
+                candidates.sort(key=lambda item: crop_area(item[0]))
+                return candidates[0]
+        return None, None
+
     square_crop = fit_ratio_crop(padded_rect, img_w, img_h, 1, 1)
     if square_crop:
         return square_crop, (1, 1)
@@ -352,20 +381,13 @@ def pick_crop(
     if largest_square:
         return largest_square, (1, 1)
 
-    ratio_pairs = [
-        [(1, 2), (2, 1)],
-        [(3, 4), (4, 3)],
-        [(2, 3), (3, 2)],
-    ]
-    for pair in ratio_pairs:
-        candidates: List[Tuple[Tuple[int, int, int, int], Tuple[int, int]]] = []
-        for ratio in pair:
-            crop = fit_ratio_crop(padded_rect, img_w, img_h, ratio[0], ratio[1])
-            if crop:
-                candidates.append((crop, ratio))
-        if candidates:
-            candidates.sort(key=lambda item: crop_area(item[0]))
-            return candidates[0]
+    crop, ratio_used = pick_ratio_crop(padded_rect)
+    if crop:
+        return crop, ratio_used
+
+    crop, ratio_used = pick_ratio_crop(rect)
+    if crop:
+        return crop, ratio_used
 
     return None, None
 
@@ -471,6 +493,7 @@ def process_images(
     cropped = 0
     kept = 0
     resized = 0
+    skipped_small = 0
     missing_labels = 0
     empty_labels = 0
     skipped_empty = 0
@@ -533,6 +556,11 @@ def process_images(
                 if did_resize:
                     resized += 1
 
+                out_w, out_h = resized_img.size
+                if max(out_w, out_h) < MIN_OUTPUT_DIM:
+                    skipped_small += 1
+                    continue
+
                 ratio_key = ratio_used if ratio_used else None
                 prefix = PREFIX_BY_RATIO.get(ratio_key, "ff_")
 
@@ -570,6 +598,7 @@ def process_images(
     print(f"- Cropped: {cropped}")
     print(f"- Kept original: {kept}")
     print(f"- Resized: {resized}")
+    print(f"- Skipped small outputs: {skipped_small}")
     print(f"- Missing labels: {missing_labels}")
     print(f"- Empty labels: {empty_labels}")
     print(f"- Skipped empty labels: {skipped_empty}")
@@ -648,7 +677,9 @@ def main() -> None:
         f"- Images out: {images_out}\n"
         f"- Labels out: {labels_out}\n"
         f"- Padding: {args.padding:.2f}%\n"
-        f"- Max dimension: {args.max_dim}"
+        f"- Max dimension: {args.max_dim}\n"
+        f"- Min output dimension: {MIN_OUTPUT_DIM}\n"
+        f"- Min bbox dimension: {MIN_BBOX_DIM}"
     )
 
     process_images(
