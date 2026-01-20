@@ -51,7 +51,9 @@ def render_progress(current: int, total: int, name: str) -> None:
     sys.stdout.flush()
 
 
-def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None:
+def resize_images(
+    source_dir: Path, dest_dir: Path | None, max_dim: int, force_jpg: bool
+) -> None:
     if not source_dir.is_dir():
         raise FileNotFoundError(f"Source directory not found: {source_dir}")
 
@@ -61,6 +63,7 @@ def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None
         f"- Source: {source_dir}\n"
         f"- Mode: {mode}\n"
         f"- Max dimension: {max_dim}\n"
+        f"- Force JPEG: {'yes' if force_jpg else 'no'}\n"
         f"- HEIC support: {'enabled' if HEIF_SUPPORTED else 'missing'}"
     )
 
@@ -104,9 +107,22 @@ def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None
                 
                 suffix = image_path.suffix.lower()
                 is_heic = suffix in HEIC_EXTENSIONS
+                is_jpeg = suffix in JPEG_EXTENSIONS
+
+                # Determine output path
+                if dest_dir:
+                    fname = image_path.name
+                    if is_heic or force_jpg:
+                        fname = image_path.with_suffix(".jpg").name
+                    output_path = dest_dir / fname
+                else:
+                    if is_heic or force_jpg:
+                        output_path = image_path.with_suffix(".jpg")
+                    else:
+                        output_path = image_path
 
                 # If in-place and no changes needed, skip
-                if not dest_dir and not needs_resize and not is_heic:
+                if not dest_dir and not needs_resize and output_path == image_path:
                     processed += 1
                     before_size = image_path.stat().st_size
                     total_before += before_size
@@ -125,15 +141,6 @@ def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None
                 else:
                     working_img = img
 
-                # Determine output path
-                if dest_dir:
-                    fname = image_path.name
-                    if is_heic:
-                        fname = image_path.with_suffix(".jpg").name
-                    output_path = dest_dir / fname
-                else:
-                    output_path = image_path.with_suffix(".jpg") if is_heic else image_path
-
                 output_suffix = output_path.suffix.lower()
 
                 save_img = working_img
@@ -148,13 +155,18 @@ def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None
 
                 total_after += output_path.stat().st_size
 
-                # Cleanup for in-place HEIC conversion
-                if not dest_dir and is_heic and output_path != image_path and image_path.exists():
+                # Cleanup for in-place format conversion
+                if (
+                    not dest_dir
+                    and output_path != image_path
+                    and image_path.exists()
+                    and (is_heic or force_jpg)
+                ):
                     image_path.unlink()
 
                 if needs_resize:
                     resized += 1
-                if is_heic:
+                if output_suffix in JPEG_EXTENSIONS and not is_jpeg:
                     converted += 1
 
         except (UnidentifiedImageError, OSError):
@@ -170,7 +182,7 @@ def resize_images(source_dir: Path, dest_dir: Path | None, max_dim: int) -> None
     if resized:
         message += f" Resized {resized} images to max dimension {max_dim}."
     if converted:
-        message += f" Converted {converted} HEIC images to JPEG."
+        message += f" Converted {converted} images to JPEG."
     if dest_dir:
         message += f" Saved to {dest_dir}."
     print(message)
@@ -200,6 +212,11 @@ def main() -> None:
         default=1024,
         help="Maximum dimension for resizing. Default: 1024",
     )
+    parser.add_argument(
+        "--force-jpg",
+        action="store_true",
+        help="Save all outputs as JPEG (.jpg), converting formats as needed.",
+    )
 
     args = parser.parse_args()
     cwd = Path.cwd()
@@ -210,7 +227,7 @@ def main() -> None:
     )
     print(f"Data root (CWD): {cwd}")
     print(f"Script dir: {script_dir}")
-    resize_images(source, destination, args.size)
+    resize_images(source, destination, args.size, args.force_jpg)
 
 
 if __name__ == "__main__":

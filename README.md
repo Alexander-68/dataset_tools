@@ -39,8 +39,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   merged labels.
 - `optimize_dataset_tiles_yolo.py`: Tile images by size/aspect into mosaics,
   rewrite YOLO labels, and copy/rescale remaining images.
-- `resize_images.py`: Resize images (and optionally convert HEIC) with progress
-  and stats.
+- `resize_images.py`: Resize images and optionally convert formats to JPEG with
+  progress and stats.
 - `rename_images_labels.py`: Rename images with matching labels using a pattern
   and update label filenames.
 - `rotate_head_tilt_yolo.py`: Rotate portraits based on head tilt and update
