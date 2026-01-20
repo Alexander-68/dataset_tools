@@ -19,3 +19,6 @@ By default, YOLO pose format contains 17 keypoints; see file dataset.yaml for th
 
 mpii-human-pose keypoint names and ids: 0 - right ankle, 1 - right knee, 2 - right hip, 3 - left hip, 4 - left knee, 5 - left ankle, 6 - pelvis, 7 - thorax, 8 - upper neck, 9 - head top, 10 - right wrist, 11 - right elbow, 12 - right shoulder, 13 - left shoulder, 14 - left elbow, 15 - left wrist.
 
+
+When during evaluating task you find something unclear or inconsistent - ask me for confirmation before implementing code.
+
