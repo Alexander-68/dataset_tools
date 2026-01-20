@@ -402,6 +402,7 @@ def transform_labels(
     crop_w = right - left
     crop_h = bottom - top
     out_lines: List[str] = []
+    eps = 1e-6
 
     for class_id, values in labels:
         if len(values) < 4:
@@ -411,6 +412,23 @@ def transform_labels(
         abs_cy = cy * height
         abs_w = bw * width
         abs_h = bh * height
+        x1 = abs_cx - abs_w / 2.0
+        y1 = abs_cy - abs_h / 2.0
+        x2 = abs_cx + abs_w / 2.0
+        y2 = abs_cy + abs_h / 2.0
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+
+        if min(abs_w, abs_h) < MIN_BBOX_DIM:
+            if (
+                x1 < left - eps
+                or y1 < top - eps
+                or x2 > right + eps
+                or y2 > bottom + eps
+            ):
+                continue
 
         new_cx = (abs_cx - left) / crop_w
         new_cy = (abs_cy - top) / crop_h

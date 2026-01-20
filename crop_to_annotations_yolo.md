@@ -9,7 +9,8 @@ ratios. It writes cropped JPEG images plus updated labels to new folders.
 - **Annotation-aware crop:** Uses all bounding boxes and visible keypoints to
   build the enclosing rectangle.
 - **Ignore tiny boxes:** Objects with a bbox min side under 24 pixels are
-  excluded from crop calculations (and their keypoints are ignored).
+  excluded from crop calculations. They are kept in output labels only if the
+  box fits fully inside the final crop; otherwise the label line is dropped.
 - **Padding with border clamp:** Adds configurable padding (default 20%), but
   clamps at image borders when needed.
 - **Padding fallback:** If a padded crop can't fit a ratio, it retries without
