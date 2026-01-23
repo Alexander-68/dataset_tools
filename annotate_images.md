@@ -15,7 +15,10 @@ assignment. The cost combines confidence-weighted keypoint distance (when
 available), box center distance, and box IoU; pairs above the match threshold
 are left unmatched and kept as-is.
 
-Progress output includes an ETA clock time when available.
+Progress output includes an ETA clock time when available. If the `images`
+folder is missing, the script prints an error and exits. YOLO prediction output
+is directed to a temporary project directory so a `runs/` folder is not created
+in the dataset root.
 
 ## Functions
 

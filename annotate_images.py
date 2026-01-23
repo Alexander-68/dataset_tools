@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -540,40 +541,46 @@ def annotate_images(
     use_tqdm = tqdm is not None
     bar = tqdm(total=total_images, desc="Annotating", unit="image") if use_tqdm else None
 
-    for index, image_path in enumerate(image_paths, start=1):
-        with Image.open(image_path) as image:
-            image = image.convert("RGB")
+    with tempfile.TemporaryDirectory(prefix="yolo_predict_") as temp_dir:
+        predict_base = {
+            "save": False,
+            "verbose": False,
+            "imgsz": img_size,
+            "conf": conf,
+            "project": temp_dir,
+            "name": "predict",
+            "exist_ok": True,
+        }
+        if iou is not None:
+            predict_base["iou"] = iou
 
-            predict_kwargs = {
-                "source": image,
-                "save": False,
-                "verbose": False,
-                "imgsz": img_size,
-                "conf": conf,
-            }
-            if iou is not None:
-                predict_kwargs["iou"] = iou
-            normal_results = model.predict(**predict_kwargs)
-            flipped_results = None
-            if flip:
-                flipped = ImageOps.mirror(image)
-                predict_kwargs["source"] = flipped
-                flipped_results = model.predict(**predict_kwargs)
+        for index, image_path in enumerate(image_paths, start=1):
+            with Image.open(image_path) as image:
+                image = image.convert("RGB")
 
-        normal_pose = extract_pose(normal_results[0]) if normal_results else None
-        flipped_pose = None
-        if flip and flipped_results:
-            flipped_pose = extract_pose(flipped_results[0])
-            if flipped_pose is not None:
-                flipped_pose = align_flipped_pose(flipped_pose, FLIP_IDX)
-        merged_pose = merge_pose(normal_pose, flipped_pose)
-        output_path = labels_dir / f"{image_path.stem}.txt"
-        write_pose_labels(output_path, merged_pose, kp_conf)
-        if bar is not None:
-            bar.set_postfix_str(format_eta(start_time, index, total_images))
-            bar.update(1)
-        else:
-            render_progress(index, total_images, image_path.name, start_time)
+                predict_kwargs = dict(predict_base)
+                predict_kwargs["source"] = image
+                normal_results = model.predict(**predict_kwargs)
+                flipped_results = None
+                if flip:
+                    flipped = ImageOps.mirror(image)
+                    predict_kwargs["source"] = flipped
+                    flipped_results = model.predict(**predict_kwargs)
+
+            normal_pose = extract_pose(normal_results[0]) if normal_results else None
+            flipped_pose = None
+            if flip and flipped_results:
+                flipped_pose = extract_pose(flipped_results[0])
+                if flipped_pose is not None:
+                    flipped_pose = align_flipped_pose(flipped_pose, FLIP_IDX)
+            merged_pose = merge_pose(normal_pose, flipped_pose)
+            output_path = labels_dir / f"{image_path.stem}.txt"
+            write_pose_labels(output_path, merged_pose, kp_conf)
+            if bar is not None:
+                bar.set_postfix_str(format_eta(start_time, index, total_images))
+                bar.update(1)
+            else:
+                render_progress(index, total_images, image_path.name, start_time)
 
     if bar is not None:
         bar.close()
@@ -636,14 +643,18 @@ if __name__ == "__main__":
     cwd = Path.cwd()
     script_dir = Path(__file__).resolve().parent
     model_url = resolve_model_path(args.model_url, script_dir)
-    annotate_images(
-        cwd,
-        model_url=model_url,
-        img_size=args.img_size,
-        conf=args.conf,
-        kp_conf=args.kp_conf,
-        iou=args.iou,
-        labels_dir_name=args.labels_dir_name,
-        flip=args.flip,
-        script_dir=script_dir,
-    )
+    try:
+        annotate_images(
+            cwd,
+            model_url=model_url,
+            img_size=args.img_size,
+            conf=args.conf,
+            kp_conf=args.kp_conf,
+            iou=args.iou,
+            labels_dir_name=args.labels_dir_name,
+            flip=args.flip,
+            script_dir=script_dir,
+        )
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
