@@ -30,6 +30,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   bounding boxes/keypoints.
 - `extract_video_frames.py`: Extract frames from all videos in CWD into
   per-video folders, with optional frame skipping.
+- `delete_similar_frames.py`: Delete near-duplicate frames by comparing each
+  image to the previous one.
 - `extract_tfrecord_images.py`: Extract JPEG images from TFRecord files with
   progress and stats.
 - `merge_datasets.py`: Merge multiple datasets into a unified train/val layout
