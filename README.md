@@ -51,6 +51,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   pose labels.
 - `rotate_images_labels.py`: Rotate images to fixed angles and update labels,
   supporting YOLO detection and pose.
+- `yolo_pose_to_coco_json.py`: Convert YOLO11-pose labels into COCO JSON files
+  for train/val splits.
 - `visualize-pose.py`: Overlay YOLO pose keypoints and boxes onto images for
   quick inspection.
 
