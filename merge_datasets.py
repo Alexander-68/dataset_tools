@@ -155,7 +155,7 @@ def merge_datasets(root: Path) -> None:
     if total_images:
         print()
 
-    update_dataset_yaml(target_dir, dict(sorted(source_stats.items())))
+    write_content_md(target_dir, dict(sorted(source_stats.items())))
 
     print(
         f"Merged {copied} image/label pairs from {len(source_entries)} source folders into "
@@ -163,34 +163,8 @@ def merge_datasets(root: Path) -> None:
     )
 
 
-def update_dataset_yaml(target_dir: Path, stats: dict[str, dict[str, int]]) -> None:
-    yaml_path = target_dir / "dataset.yaml"
-    if not yaml_path.is_file():
-        print(f"Warning: dataset YAML file not found at {yaml_path}")
-        return
-
-    try:
-        lines = yaml_path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        print(f"Warning: could not read YAML file {yaml_path}: {exc}")
-        return
-
-    try:
-        content_idx = next(
-            idx for idx, line in enumerate(lines) if line.strip().lower() == "# content:"
-        )
-    except StopIteration:
-        print("Warning: '# Content:' section not found in dataset YAML; skipping update.")
-        return
-
-    remove_end = content_idx + 1
-    while (
-        remove_end < len(lines)
-        and lines[remove_end].lstrip().startswith("#")
-        and lines[remove_end].strip() != ""
-    ):
-        remove_end += 1
-
+def write_content_md(target_dir: Path, stats: dict[str, dict[str, int]]) -> None:
+    content_path = target_dir / "content.md"
     total_train_images = sum(values.get("train_images", 0) for values in stats.values())
     total_val_images = sum(values.get("val_images", 0) for values in stats.values())
     total_images = total_train_images + total_val_images
@@ -202,7 +176,7 @@ def update_dataset_yaml(target_dir: Path, stats: dict[str, dict[str, int]]) -> N
     )
     total_instances = total_train_instances + total_val_instances
 
-    summary_lines = ["#   Sources merged:"]
+    summary_lines = ["# Merge Summary", "", "Sources merged:"]
     if stats:
         for source, values in stats.items():
             train_images = values.get("train_images", 0)
@@ -212,27 +186,25 @@ def update_dataset_yaml(target_dir: Path, stats: dict[str, dict[str, int]]) -> N
             val_instances = values.get("val_instances", 0)
             source_total_instances = train_instances + val_instances
             summary_lines.append(
-                "#     "
-                f"{source}: {source_total_images} images "
+                f"- {source}: {source_total_images} images "
                 f"(train {train_images}, val {val_images}); "
                 f"{source_total_instances} instances "
                 f"(train {train_instances}, val {val_instances})"
             )
     else:
-        summary_lines.append("#     None (no new sources merged)")
+        summary_lines.append("- None (no new sources merged)")
+    summary_lines.append("")
     summary_lines.append(
-        "#   Totals: "
+        "Totals: "
         f"{total_images} images (train {total_train_images}, val {total_val_images}); "
         f"{total_instances} instances "
         f"(train {total_train_instances}, val {total_val_instances})"
     )
 
-    updated_lines = lines[: content_idx + 1] + summary_lines + lines[remove_end:]
-
     try:
-        yaml_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+        content_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     except OSError as exc:
-        print(f"Warning: could not write YAML file {yaml_path}: {exc}")
+        print(f"Warning: could not write content file {content_path}: {exc}")
 
 
 def main() -> int:

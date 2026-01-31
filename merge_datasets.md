@@ -1,6 +1,6 @@
 # merge_datasets.py
 
-`merge_datasets.py` consolidates multiple pill-detection datasets into a single training/validation layout that matches the structure expected in `Verified/Final_dataset`. It also documents the image counts per source inside `dataset.yaml`.
+`merge_datasets.py` consolidates multiple pill-detection datasets into a single training/validation layout that matches the structure expected in `Verified/Final_dataset`. It also documents the image counts per source inside `content.md`.
 
 ## Dataset Layout
 
@@ -30,7 +30,7 @@ Verified/
    - If a source dataset has fewer than 64 images, all pairs are copied to the training folders (`images/train`, `labels/train`).
    - Otherwise, every 8th pair is sent to the validation folders (`images/val`, `labels/val`), and the rest go to training.
 5. Prefixes filenames with the source folder name to avoid collisions when datasets share image names.
-6. Updates `Verified/Final_dataset/dataset.yaml` under the `# Content:` section, listing per-source train/val counts and appending overall totals.
+6. Writes `Verified/Final_dataset/content.md`, listing per-source train/val counts and appending overall totals.
 
 If destination files already exist, the script aborts to prevent silent overwrites.
 
@@ -42,7 +42,7 @@ Run the script from the project root:
 python merge_datasets.py
 ```
 
-After completion, `Verified/Final_dataset` contains the merged train/validation splits, `dataset.yaml` records the per-source image counts, and the original datasets remain unchanged.
+After completion, `Verified/Final_dataset` contains the merged train/validation splits, `content.md` records the per-source image counts, and the original datasets remain unchanged.
 
 ## Paths
 

@@ -35,7 +35,7 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
 - `extract_tfrecord_images.py`: Extract JPEG images from TFRecord files with
   progress and stats.
 - `merge_datasets.py`: Merge multiple datasets into a unified train/val layout
-  and update `dataset.yaml` counts.
+  and write `content.md` counts.
 - `merge_pose_results.py`: Merge body and face pose labels, refining face points.
 - `mosaic_self_yolo.py`: Build self-mosaics and rewrite YOLO detection/pose
   labels.
