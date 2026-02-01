@@ -21,7 +21,7 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
 - `correct_mpii_keypoints.py`: Replace selected COCO keypoints with MPII pose
   keypoints using bbox-based matching.
 - `crop_portrait_square_yolo.py`: Face-centered square crops of portraits using
-  YOLO pose keypoints, with optional resize/rotate/debug.
+  YOLO pose keypoints, with optional resize/rotate/ratio/flip/debug.
 - `crop_to_annotations_yolo.py`: Crop images and YOLO labels around all boxes
   and keypoints with padded aspect ratio selection and prefixed outputs.
 - `download_google_images.py`: Download full-resolution images from Google or

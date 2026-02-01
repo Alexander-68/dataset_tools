@@ -1,7 +1,8 @@
 # Square Portrait Crop (YOLO Pose)
 
-`crop_portrait_square_yolo.py` crops portrait images to a square by centering on
-the face keypoints (nose, eyes, ears) detected by a YOLO pose model.
+`crop_portrait_square_yolo.py` crops portrait images to a square (or optional
+2:3) by centering on the face keypoints (nose, eyes, ears) detected by a YOLO
+pose model.
 
 ## Features
 
@@ -15,10 +16,12 @@ the face keypoints (nose, eyes, ears) detected by a YOLO pose model.
   image area, and the second person is at least 45% of the largest person.
 - **In-place or destination:** Overwrite the original images or write to a new
   output folder.
-- **Optional resize:** Resize the final square crop to a target pixel size.
-- **Face diameter crop:** Optionally size the square crop using face diameter.
+- **Optional resize:** Resize the final crop to a target width (height follows the aspect).
+- **Face diameter crop:** Optionally size the crop using face diameter.
 - **Debug overlay:** Draw a white face circle before cropping.
 - **Rotation:** Optional random clockwise rotation before cropping.
+- **2:3 ratio:** Optional portrait ratio crop (width:height = 2:3).
+- **Flip:** Optional left-to-right flip after cropping.
 - **EXIF orientation:** Respects EXIF rotation via auto-transpose.
 - **Progress + stats:** Shows a progress bar (with ETA) and final summary.
 
@@ -34,9 +37,11 @@ python crop_portrait_square_yolo.py [OPTIONS]
 - `--output`: Optional output folder. If omitted, crops in-place.
 - `--model`: YOLO pose model path/name. Relative paths resolve from the script
   directory. Defaults to `yolo11x-pose.pt`.
-- `--size`: Optional output size (pixels) for the final square crop.
+- `--size`: Optional output width (pixels) for the final crop (height follows aspect).
 - `--crop-percent`: Expand crop size from face diameter by a percent (default: max square).
 - `--rotate`: Random clockwise rotation between 10 and 45 degrees before cropping.
+- `--ratio-23`: Use a 2:3 (width:height) crop instead of square.
+- `--flip`: Flip the final cropped image left-to-right.
 - `--debug-draw`: Draw a white circle (face center + diameter) before cropping.
 
 ### Output
@@ -92,6 +97,18 @@ python crop_portrait_square_yolo.py --crop-percent 20 --debug-draw
 
 ```bash
 python crop_portrait_square_yolo.py --rotate
+```
+
+**8. Flip the final crop left-to-right:**
+
+```bash
+python crop_portrait_square_yolo.py --flip
+```
+
+**9. Crop with 2:3 ratio and resize to 512x768:**
+
+```bash
+python crop_portrait_square_yolo.py --ratio-23 --size 512
 ```
 
 ## Dependencies

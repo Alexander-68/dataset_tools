@@ -199,38 +199,83 @@ def estimate_face_diameter(
     return max_dist * 1.44 if max_dist > 0 else None
 
 
-def square_crop_box(
+def aspect_crop_box(
     width: int,
     height: int,
     center: Tuple[float, float],
-    side: Optional[int],
+    crop_width: Optional[float],
+    aspect_ratio: float,
 ) -> Optional[Tuple[int, int, int, int]]:
     cx, cy = center
     if width <= 1 or height <= 1:
         return None
     cx = max(0.0, min(cx, width - 1))
     cy = max(0.0, min(cy, height - 1))
-    if side is None:
-        half = min(cx, cy, width - cx, height - cy)
-        half_int = int(math.floor(half))
-        if half_int < 1:
+
+    max_half_w = min(cx, width - cx)
+    max_half_h = min(cy, height - cy)
+    if max_half_w <= 0 or max_half_h <= 0:
+        return None
+
+    if crop_width is None:
+        half_w = min(max_half_w, max_half_h * aspect_ratio)
+        if half_w < 1:
             return None
-        side = 2 * half_int
     else:
-        side = int(side)
-        if side < 2:
+        half_w = crop_width / 2.0
+        if half_w < 1:
             return None
+        half_h = half_w / aspect_ratio
+        if half_w * 2.0 > width or half_h * 2.0 > height:
+            scale = min(width / (half_w * 2.0), height / (half_h * 2.0))
+            if scale <= 0:
+                return None
+            half_w *= scale
 
-    left = int(round(cx - side / 2))
-    top = int(round(cy - side / 2))
-    left = max(0, min(left, width - side))
-    top = max(0, min(top, height - side))
-    return (left, top, left + side, top + side)
+    half_h = half_w / aspect_ratio
+    left = cx - half_w
+    top = cy - half_h
+    right = cx + half_w
+    bottom = cy + half_h
+
+    if left < 0:
+        right -= left
+        left = 0.0
+    if right > width:
+        left -= right - width
+        right = float(width)
+    if top < 0:
+        bottom -= top
+        top = 0.0
+    if bottom > height:
+        top -= bottom - height
+        bottom = float(height)
+
+    left = max(0.0, left)
+    top = max(0.0, top)
+    right = min(float(width), right)
+    bottom = min(float(height), bottom)
+    if right - left < 1 or bottom - top < 1:
+        return None
+
+    left_i = int(round(left))
+    top_i = int(round(top))
+    right_i = int(round(right))
+    bottom_i = int(round(bottom))
+    right_i = max(left_i + 1, min(right_i, width))
+    bottom_i = max(top_i + 1, min(bottom_i, height))
+    return (left_i, top_i, right_i, bottom_i)
 
 
-def save_image(img: Image.Image, output_path: Path, size: Optional[int]) -> None:
+def save_image(
+    img: Image.Image,
+    output_path: Path,
+    size: Optional[int],
+    aspect_ratio: float,
+) -> None:
     if size is not None and size > 0:
-        img = img.resize((size, size), Image.LANCZOS)
+        height = int(round(size / aspect_ratio))
+        img = img.resize((size, height), Image.LANCZOS)
     output_suffix = output_path.suffix.lower()
     save_img = img
     if output_suffix in {".jpg", ".jpeg"} and save_img.mode not in ("RGB", "L"):
@@ -248,6 +293,8 @@ def crop_portraits(
     size: Optional[int],
     crop_percent: Optional[float],
     rotate: bool,
+    ratio_23: bool,
+    flip: bool,
     debug_draw: bool,
     name_prefix: str,
 ) -> None:
@@ -260,9 +307,11 @@ def crop_portraits(
         f"- Source: {source_dir}\n"
         f"- Mode: {mode}\n"
         f"- Model: {model_path}\n"
-        f"- Output size: {size}\n"
+        f"- Output width: {size}\n"
         f"- Crop percent: {crop_percent}\n"
         f"- Rotate: {rotate}\n"
+        f"- Ratio 2:3: {ratio_23}\n"
+        f"- Flip: {flip}\n"
         f"- Debug draw: {debug_draw}\n"
         f"- Name prefix: {name_prefix or '(none)'}"
     )
@@ -282,6 +331,7 @@ def crop_portraits(
     cropped = 0
     no_pose = 0
     skipped = 0
+    aspect_ratio = 2.0 / 3.0 if ratio_23 else 1.0
 
     start_time = time.monotonic()
     for index, image_path in enumerate(files, start=1):
@@ -346,25 +396,32 @@ def crop_portraits(
                         secondary_center[1] + secondary_radius,
                     )
                     center = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-                    crop_side = max(max_x - min_x, max_y - min_y)
+                    crop_span_x = max_x - min_x
+                    crop_span_y = max_y - min_y
+                    crop_half_w = max(crop_span_x / 2.0, (crop_span_y / 2.0) * aspect_ratio)
+                    crop_width = crop_half_w * 2.0
                     if crop_percent is not None:
-                        crop_side *= 1.0 + crop_percent / 100.0
-                    crop_side = int(round(crop_side))
-                    max_side = min(width, height)
-                    if crop_side > max_side:
-                        crop_side = max_side
-                    crop_box = square_crop_box(width, height, center, crop_side)
+                        crop_width *= 1.0 + crop_percent / 100.0
+                    crop_box = aspect_crop_box(
+                        width,
+                        height,
+                        center,
+                        crop_width,
+                        aspect_ratio,
+                    )
                 else:
                     center = primary["center"]
                     face_diameter = primary["face_diameter"]
-                    crop_side = None
+                    crop_width = None
                     if crop_percent is not None and face_diameter is not None:
-                        crop_side = face_diameter * (1.0 + crop_percent / 100.0)
-                        crop_side = int(round(crop_side))
-                        max_side = min(width, height)
-                        if crop_side > max_side:
-                            crop_side = max_side
-                    crop_box = square_crop_box(width, height, center, crop_side)
+                        crop_width = face_diameter * (1.0 + crop_percent / 100.0)
+                    crop_box = aspect_crop_box(
+                        width,
+                        height,
+                        center,
+                        crop_width,
+                        aspect_ratio,
+                    )
 
                 if crop_box is None:
                     skipped += 1
@@ -393,13 +450,15 @@ def crop_portraits(
                         )
 
                 cropped_img = img.crop(crop_box)
+                if flip:
+                    cropped_img = ImageOps.mirror(cropped_img)
 
                 output_name = (
                     f"{name_prefix}{image_path.name}" if name_prefix else image_path.name
                 )
                 target_dir = image_path.parent if output_dir is None else output_dir
                 output_path = target_dir / output_name
-                save_image(cropped_img, output_path, size)
+                save_image(cropped_img, output_path, size, aspect_ratio)
                 cropped += 1
                 processed += 1
         except (UnidentifiedImageError, OSError):
@@ -425,7 +484,7 @@ def crop_portraits(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Square-crop portrait images by centering on face keypoints "
+            "Crop portrait images by centering on face keypoints "
             "(nose + eyes) from a YOLO pose model."
         )
     )
@@ -450,7 +509,12 @@ def parse_args() -> argparse.Namespace:
         "--size",
         type=int,
         default=None,
-        help="Optional output size for the square crop in pixels.",
+        help="Optional output width in pixels (height follows aspect ratio).",
+    )
+    parser.add_argument(
+        "--ratio-23",
+        action="store_true",
+        help="Crop with a 2:3 (width:height) aspect ratio instead of square.",
     )
     parser.add_argument(
         "--crop-percent",
@@ -458,13 +522,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional percent to expand crop size from face diameter "
-            "(e.g., 20 means fd * 1.2). Default: max possible square."
+            "(e.g., 20 means fd * 1.2). Default: max possible crop."
         ),
     )
     parser.add_argument(
         "--rotate",
         action="store_true",
         help="Random clockwise rotation between 10 and 45 degrees before cropping.",
+    )
+    parser.add_argument(
+        "--flip",
+        action="store_true",
+        help="Flip the final cropped image left-to-right.",
     )
     parser.add_argument(
         "--debug-draw",
@@ -495,6 +564,8 @@ def main() -> None:
         args.size,
         args.crop_percent,
         args.rotate,
+        args.ratio_23,
+        args.flip,
         args.debug_draw,
         args.name_prefix,
     )
