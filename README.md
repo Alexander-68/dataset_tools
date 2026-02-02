@@ -18,6 +18,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   coordinates when invisible.
 - `correct_face_keypoints.py`: Merge improved face keypoints into pose labels
   with weighted blending and deviation stats.
+- `add_face_keypoints.py`: Add eye/ear keypoints from face labels into base pose
+  labels using closest-nose matching.
 - `correct_mpii_keypoints.py`: Replace selected COCO keypoints with MPII pose
   keypoints using bbox-based matching.
 - `crop_portrait_square_yolo.py`: Face-centered square crops of portraits using
