@@ -1,4 +1,4 @@
-# YOLO Dataset Utilities
+﻿# YOLO Dataset Utilities
 
 Small, focused scripts for preparing YOLO detection/pose datasets: annotation
 generation, label cleanup/merging, mosaics, and image preprocessing.
@@ -47,6 +47,7 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   rewrite YOLO labels, and copy/rescale remaining images.
 - `resize_images.py`: Resize images and optionally convert formats to JPEG with
   progress and stats.
+- `sam3.py`: Run SAM3 text prompts on one image and export YOLO bbox labels.
 - `rename_images_labels.py`: Rename images with matching labels using a pattern
   and update label filenames.
 - `rotate_head_tilt_yolo.py`: Rotate portraits based on head tilt and update
