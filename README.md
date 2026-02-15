@@ -22,6 +22,9 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   labels using closest face-area matching (or nose matching with `--nose`).
 - `correct_mpii_keypoints.py`: Replace selected COCO keypoints with MPII pose
   keypoints using bbox-based matching.
+- `predict_pose_optical_flow.py`: Predict pose keypoints for a target indexed
+  image by tracking keypoints from the nearest previous labeled frame with
+  pyramidal Lucas-Kanade optical flow and reverse back-check.
 - `crop_portrait_square_yolo.py`: Face-centered square crops of portraits using
   YOLO pose keypoints, with optional resize/rotate/ratio/flip/debug.
 - `crop_detected_objects_yolo.py`: Crop images to keep all YOLO-detected boxes
