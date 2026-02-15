@@ -28,6 +28,8 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   and keypoints with padded aspect ratio selection and prefixed outputs.
 - `download_google_images.py`: Download full-resolution images from Google or
   Yandex Images search URLs, save as JPEGs, and optionally resize.
+- `download_videos_yt_dlp.py`: Download TikTok/YouTube videos from `urls.txt`
+  (or a single CLI URL) in best available quality using yt-dlp.
 - `extend_flip_yolo.py`: Extend images with a flipped duplicate and update
   bounding boxes/keypoints.
 - `extract_video_frames.py`: Extract frames from all videos in CWD into
