@@ -28,32 +28,58 @@ def resolve_path(path: Path, base: Path) -> Path:
     return base / path
 
 
-def format_eta(seconds: float | None) -> str:
+def format_eta_clock(seconds: float | None) -> str:
     if seconds is None or not math.isfinite(seconds):
         return "--:--"
-    seconds = max(0, int(round(seconds)))
-    minutes, secs = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+    eta_finish_timestamp = time.time() + max(0.0, float(seconds))
+    return time.strftime("%H:%M", time.localtime(eta_finish_timestamp))
 
 
-def render_progress(current: int, total: int, start_time: float, label: str) -> None:
+def render_progress(current: float, total: float, start_time: float, label: str) -> None:
     if total <= 0:
         return
+    current = min(max(0.0, current), total)
     elapsed = max(0.0001, time.time() - start_time)
     rate = current / elapsed if current else 0.0
     eta_seconds = (total - current) / rate if rate else None
-    eta = format_eta(eta_seconds)
+    eta = format_eta_clock(eta_seconds)
     bar_width = 28
     filled = int(round(bar_width * current / total))
     bar = "#" * filled + "-" * (bar_width - filled)
     percent = int(100 * current / total)
+    shown_current = int(round(current))
+    shown_total = int(round(total))
     tail = label
     if len(tail) > 36:
         tail = f"...{tail[-33:]}"
-    print(f"\r[{bar}] {current}/{total} {percent:3d}% ETA {eta} {tail}   ", end="", flush=True)
+    print(
+        f"\r[{bar}] {shown_current}/{shown_total} {percent:3d}% ETA {eta} {tail}   ",
+        end="",
+        flush=True,
+    )
+
+
+def estimate_history_depth_for_target(
+    target_pos: int,
+    history_mode: str,
+    history_size: int,
+) -> int:
+    if history_mode == "batch":
+        return max(1, min(target_pos, history_size))
+    return max(1, history_size)
+
+
+def build_target_work_units(
+    target_count: int,
+    history_mode: str,
+    history_size: int,
+) -> list[float]:
+    if target_count <= 0:
+        return []
+    return [
+        float(estimate_history_depth_for_target(pos, history_mode, history_size))
+        for pos in range(1, target_count + 1)
+    ]
 
 
 def parse_yolo_pose_line(line: str) -> dict | None:
@@ -140,16 +166,24 @@ def select_target_image(indexed_images: list[dict], target_index: int) -> tuple[
     return chosen, True
 
 
-def select_source_image_and_objects(
+def collect_source_images_and_objects(
     indexed_images: list[dict],
     labels_dir: Path,
     target_index: int,
     class_id: int,
     source_object: int,
-) -> tuple[dict, Path, list[dict]]:
-    previous_candidates = [item for item in indexed_images if item["index"] < target_index]
+    max_sources: int,
+    min_source_index: int | None = None,
+) -> list[dict]:
+    previous_candidates = [
+        item
+        for item in indexed_images
+        if item["index"] < target_index
+        and (min_source_index is None or item["index"] >= min_source_index)
+    ]
     previous_candidates.sort(key=lambda item: item["index"], reverse=True)
 
+    collected: list[dict] = []
     for candidate in previous_candidates:
         label_path = labels_dir / f"{candidate['path'].stem}.txt"
         if not label_path.exists():
@@ -160,11 +194,21 @@ def select_source_image_and_objects(
             continue
 
         if source_object >= 0:
-            if source_object >= len(pose_entries):
+            # Select source objects from newest to oldest so repeated runs
+            # use the latest appended annotation by default.
+            reverse_index = len(pose_entries) - 1 - source_object
+            if reverse_index < 0:
                 continue
-            return candidate, label_path, [pose_entries[source_object]]
+            objects = [pose_entries[reverse_index]]
+        else:
+            objects = pose_entries
 
-        return candidate, label_path, pose_entries
+        collected.append({"image": candidate, "label_path": label_path, "objects": objects})
+        if max_sources > 0 and len(collected) >= max_sources:
+            break
+
+    if collected:
+        return collected
 
     if source_object >= 0:
         raise FileNotFoundError(
@@ -187,7 +231,7 @@ def predict_keypoint_with_backcheck(
     point_norm: tuple[float, float],
     lk_params: dict,
     backcheck_threshold: float,
-) -> tuple[bool, tuple[float, float] | None, str]:
+) -> tuple[bool, tuple[float, float] | None, str, float | None]:
     flow_height, flow_width = prev_gray.shape[:2]
 
     x = float(point_norm[0]) * flow_width
@@ -204,7 +248,7 @@ def predict_keypoint_with_backcheck(
         **lk_params,
     )
     if point_next is None or status_forward is None or int(status_forward[0, 0]) != 1:
-        return False, None, "forward_fail"
+        return False, None, "forward_fail", None
 
     point_back, status_backward, _ = cv2.calcOpticalFlowPyrLK(
         target_gray,
@@ -214,31 +258,122 @@ def predict_keypoint_with_backcheck(
         **lk_params,
     )
     if point_back is None or status_backward is None or int(status_backward[0, 0]) != 1:
-        return False, None, "backward_fail"
+        return False, None, "backward_fail", None
 
     forward_xy = point_next[0, 0]
     backward_xy = point_back[0, 0]
     back_error = float(np.linalg.norm(point_prev[0, 0] - backward_xy))
     if back_error > backcheck_threshold:
-        return False, None, "backcheck_fail"
+        return False, None, "backcheck_fail", back_error
 
     x_next = float(forward_xy[0])
     y_next = float(forward_xy[1])
     if x_next < 0.0 or x_next >= flow_width or y_next < 0.0 or y_next >= flow_height:
-        return False, None, "out_of_frame"
+        return False, None, "out_of_frame", back_error
 
-    return True, (x_next / flow_width, y_next / flow_height), "ok"
+    return True, (x_next / flow_width, y_next / flow_height), "ok", back_error
+
+
+def attempt_predict_with_retry(
+    prev_gray: np.ndarray,
+    target_gray: np.ndarray,
+    point_norm: tuple[float, float],
+    lk_params: dict,
+    retry_lk_params: dict,
+    backcheck_threshold: float,
+    retry_backcheck_threshold: float,
+) -> tuple[bool, tuple[float, float] | None, str, bool, float | None]:
+    ok, predicted_xy, reason, back_error = predict_keypoint_with_backcheck(
+        prev_gray,
+        target_gray,
+        point_norm,
+        lk_params,
+        backcheck_threshold,
+    )
+    if ok and predicted_xy is not None:
+        return True, predicted_xy, "ok", False, back_error
+
+    ok_retry, predicted_xy_retry, reason_retry, back_error_retry = predict_keypoint_with_backcheck(
+        prev_gray,
+        target_gray,
+        point_norm,
+        retry_lk_params,
+        retry_backcheck_threshold,
+    )
+    if ok_retry and predicted_xy_retry is not None:
+        return True, predicted_xy_retry, "ok", True, back_error_retry
+
+    return False, None, reason_retry, True, back_error_retry
+
+
+def fuse_keypoint_candidates(
+    candidates: list[dict],
+    target_index: int,
+    history_decay: float,
+) -> tuple[tuple[float, float], int]:
+    if len(candidates) == 1:
+        xy = candidates[0]["xy"]
+        return (xy[0], xy[1]), 0
+
+    weights: list[float] = []
+    points: list[tuple[float, float]] = []
+    for candidate in candidates:
+        source_index = int(candidate["source_index"])
+        frame_gap = max(1, target_index - source_index)
+        distance_weight = math.exp(-frame_gap / max(0.001, history_decay))
+
+        back_error = candidate.get("back_error")
+        quality_weight = 1.0 / (1.0 + max(0.0, float(back_error if back_error is not None else 0.0)))
+        retry_penalty = 0.85 if candidate.get("used_retry") else 1.0
+        weight = max(1e-6, distance_weight * quality_weight * retry_penalty)
+        weights.append(weight)
+        points.append((float(candidate["xy"][0]), float(candidate["xy"][1])))
+
+    xs = np.array([point[0] for point in points], dtype=np.float64)
+    ys = np.array([point[1] for point in points], dtype=np.float64)
+    ws = np.array(weights, dtype=np.float64)
+
+    rejected = 0
+    if len(points) >= 3:
+        median_x = float(np.median(xs))
+        median_y = float(np.median(ys))
+        distances = np.sqrt((xs - median_x) ** 2 + (ys - median_y) ** 2)
+        median_distance = float(np.median(distances))
+        distance_limit = max(0.002, median_distance * 2.5)
+        keep_mask = distances <= distance_limit
+
+        if not np.any(keep_mask):
+            best_idx = int(np.argmin(distances))
+            keep_mask = np.zeros_like(distances, dtype=bool)
+            keep_mask[best_idx] = True
+
+        rejected = int((~keep_mask).sum())
+        xs = xs[keep_mask]
+        ys = ys[keep_mask]
+        ws = ws[keep_mask]
+
+    total_weight = float(np.sum(ws))
+    if total_weight <= 0:
+        return points[0], rejected
+
+    fused_x = float(np.sum(xs * ws) / total_weight)
+    fused_y = float(np.sum(ys * ws) / total_weight)
+    return (fused_x, fused_y), rejected
 
 
 def predict_objects(
-    source_objects: list[dict],
-    prev_gray: np.ndarray,
+    source_contexts: list[dict],
     target_gray: np.ndarray,
+    target_index: int,
     num_keypoints: int,
     lk_params: dict,
     backcheck_threshold: float,
+    history_decay: float,
     show_progress: bool = True,
 ) -> tuple[list[str], dict[str, int]]:
+    if not source_contexts:
+        raise RuntimeError("No source contexts were provided for keypoint prediction.")
+
     output_lines: list[str] = []
     base_win_w, base_win_h = lk_params["winSize"]
     retry_win_w = max(2, int(round(base_win_w * 1.5)))
@@ -246,6 +381,26 @@ def predict_objects(
     retry_lk_params = dict(lk_params)
     retry_lk_params["winSize"] = (retry_win_w, retry_win_h)
     retry_backcheck_threshold = backcheck_threshold * 2.0
+    nearest_context = source_contexts[0]
+    nearest_objects = nearest_context["objects"]
+    if not nearest_objects:
+        raise RuntimeError("Nearest source context does not contain any objects.")
+
+    target_cache: dict[tuple[int, int], np.ndarray] = {
+        tuple(target_gray.shape[:2]): target_gray
+    }
+
+    def get_target_for_shape(shape: tuple[int, int]) -> np.ndarray:
+        if shape in target_cache:
+            return target_cache[shape]
+        resized = cv2.resize(
+            target_gray,
+            (shape[1], shape[0]),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        target_cache[shape] = resized
+        return resized
+
     stats = {
         "objects_appended": 0,
         "keypoints_total": 0,
@@ -258,69 +413,109 @@ def predict_objects(
         "backward_fail": 0,
         "backcheck_fail": 0,
         "out_of_frame": 0,
+        "keypoints_fused_multi_source": 0,
+        "keypoints_outlier_candidates_rejected": 0,
+        "sources_used_total": 0,
     }
 
-    total_steps = max(1, len(source_objects) * num_keypoints)
+    total_steps = max(1, len(nearest_objects) * num_keypoints)
     step_index = 0
     start_time = time.time()
 
-    for object_idx, entry in enumerate(source_objects, start=1):
+    for object_idx, entry in enumerate(nearest_objects, start=1):
         bbox = entry["bbox"][:]
-        source_kpts = entry["kpts"]
+        fallback_kpts = entry["kpts"]
         predicted_kpts: list[list[float]] = []
 
         for kp_idx in range(num_keypoints):
             step_index += 1
             stats["keypoints_total"] += 1
 
-            if kp_idx >= len(source_kpts):
-                predicted_kpts.append([0.0, 0.0, 0.0])
-                stats["keypoints_source_invalid"] += 1
-                if show_progress:
-                    render_progress(step_index, total_steps, start_time, f"obj{object_idx} kp{kp_idx}")
-                continue
-
-            source_point = source_kpts[kp_idx]
-            if not is_valid_source_keypoint(source_point):
-                predicted_kpts.append([0.0, 0.0, 0.0])
-                stats["keypoints_source_invalid"] += 1
-                if show_progress:
-                    render_progress(step_index, total_steps, start_time, f"obj{object_idx} kp{kp_idx}")
-                continue
-
-            ok, predicted_xy, reason = predict_keypoint_with_backcheck(
-                prev_gray,
-                target_gray,
-                (source_point[0], source_point[1]),
-                lk_params,
-                backcheck_threshold,
+            fallback_point = (
+                fallback_kpts[kp_idx]
+                if kp_idx < len(fallback_kpts)
+                else [0.0, 0.0, 0.0]
             )
-            if not ok or predicted_xy is None:
-                stats["keypoints_retry_attempted"] += 1
-                ok_retry, predicted_xy_retry, reason_retry = predict_keypoint_with_backcheck(
-                    prev_gray,
-                    target_gray,
-                    (source_point[0], source_point[1]),
-                    retry_lk_params,
-                    retry_backcheck_threshold,
-                )
-                if not ok_retry or predicted_xy_retry is None:
-                    predicted_kpts.append([source_point[0], source_point[1], source_point[2]])
-                    stats["keypoints_kept_previous"] += 1
-                    stats[reason_retry] += 1
-                    if show_progress:
-                        render_progress(step_index, total_steps, start_time, f"obj{object_idx} kp{kp_idx}")
+            fallback_valid = is_valid_source_keypoint(fallback_point)
+            history_fallback_point: list[float] | None = fallback_point[:] if fallback_valid else None
+            source_valid_visibility = float(fallback_point[2]) if fallback_valid else 0.0
+
+            candidates: list[dict] = []
+
+            for source_ctx in source_contexts:
+                source_objects = source_ctx["objects"]
+                if object_idx - 1 >= len(source_objects):
                     continue
 
-                predicted_kpts.append([predicted_xy_retry[0], predicted_xy_retry[1], source_point[2]])
-                stats["keypoints_predicted"] += 1
-                stats["keypoints_retry_predicted"] += 1
-                if show_progress:
-                    render_progress(step_index, total_steps, start_time, f"obj{object_idx} kp{kp_idx}")
-                continue
+                source_kpts = source_objects[object_idx - 1]["kpts"]
+                if kp_idx >= len(source_kpts):
+                    continue
 
-            predicted_kpts.append([predicted_xy[0], predicted_xy[1], source_point[2]])
-            stats["keypoints_predicted"] += 1
+                source_point = source_kpts[kp_idx]
+                if not is_valid_source_keypoint(source_point):
+                    continue
+                if history_fallback_point is None:
+                    history_fallback_point = source_point[:]
+                source_valid_visibility = max(source_valid_visibility, float(source_point[2]))
+
+                prev_gray = source_ctx["gray"]
+                target_for_source = get_target_for_shape(tuple(prev_gray.shape[:2]))
+
+                ok, predicted_xy, reason, used_retry, back_error = attempt_predict_with_retry(
+                    prev_gray,
+                    target_for_source,
+                    (source_point[0], source_point[1]),
+                    lk_params,
+                    retry_lk_params,
+                    backcheck_threshold,
+                    retry_backcheck_threshold,
+                )
+                if used_retry:
+                    stats["keypoints_retry_attempted"] += 1
+                if not ok or predicted_xy is None:
+                    stats[reason] += 1
+                    continue
+
+                if used_retry:
+                    stats["keypoints_retry_predicted"] += 1
+                candidates.append(
+                    {
+                        "xy": predicted_xy,
+                        "source_index": source_ctx["image"]["index"],
+                        "used_retry": used_retry,
+                        "back_error": back_error,
+                        "visibility": float(source_point[2]),
+                    }
+                )
+
+            stats["sources_used_total"] += len(candidates)
+            if candidates:
+                if len(candidates) > 1:
+                    fused_xy, rejected_candidates = fuse_keypoint_candidates(
+                        candidates,
+                        target_index,
+                        history_decay,
+                    )
+                    stats["keypoints_fused_multi_source"] += 1
+                    stats["keypoints_outlier_candidates_rejected"] += rejected_candidates
+                else:
+                    one_xy = candidates[0]["xy"]
+                    fused_xy = (float(one_xy[0]), float(one_xy[1]))
+                fused_visibility = max(
+                    source_valid_visibility,
+                    max(float(candidate["visibility"]) for candidate in candidates),
+                )
+                predicted_kpts.append([fused_xy[0], fused_xy[1], fused_visibility])
+                stats["keypoints_predicted"] += 1
+            elif history_fallback_point is not None:
+                predicted_kpts.append(
+                    [history_fallback_point[0], history_fallback_point[1], history_fallback_point[2]]
+                )
+                stats["keypoints_kept_previous"] += 1
+            else:
+                predicted_kpts.append([0.0, 0.0, 0.0])
+                stats["keypoints_source_invalid"] += 1
+
             if show_progress:
                 render_progress(step_index, total_steps, start_time, f"obj{object_idx} kp{kp_idx}")
 
@@ -343,14 +538,22 @@ def run_prediction(
     num_keypoints: int,
     backcheck_threshold: float,
     window_size: int,
+    history_mode: str,
+    history_size: int,
+    history_decay: float,
 ) -> None:
     base_window = (window_size, window_size)
     retry_window = (
         max(2, int(round(base_window[0] * 1.5))),
         max(2, int(round(base_window[1] * 1.5))),
     )
+    history_size_text = (
+        f"max {history_size}, in-batch growth only"
+        if history_mode == "batch"
+        else f"max {history_size}, always look backward"
+    )
     print(
-        "Starting YOLO pose keypoint prediction from previous indexed frame using optical flow.\n"
+        "Starting YOLO pose keypoint prediction using optical flow.\n"
         f"- Images dir: {images_dir}\n"
         f"- Labels dir: {labels_dir}\n"
         f"- Target index start: {target_index_start}\n"
@@ -358,6 +561,9 @@ def run_prediction(
         f"- Source object index: {source_object if source_object >= 0 else 'all'}\n"
         f"- Class id: {class_id}\n"
         f"- Num keypoints: {num_keypoints}\n"
+        f"- Source history mode: {history_mode}\n"
+        f"- Source history size: {history_size_text}\n"
+        f"- History decay (frames): {history_decay:.2f}\n"
         "- Optical flow: Lucas-Kanade pyramidal\n"
         "- LK levels: 3\n"
         f"- Window size: {base_window[0]}x{base_window[1]}\n"
@@ -411,6 +617,9 @@ def run_prediction(
     is_batch_mode = target_index_end is not None
     if is_batch_mode:
         print("Batch mode: compact output (single progress bar + final stats).")
+    batch_min_source_index = target_images[0]["index"] if history_mode == "batch" else None
+    target_work_units = build_target_work_units(len(target_images), history_mode, history_size)
+    total_work_units = float(sum(target_work_units)) if target_work_units else 1.0
 
     lk_params = {
         "winSize": base_window,
@@ -430,58 +639,85 @@ def run_prediction(
         "backward_fail": 0,
         "backcheck_fail": 0,
         "out_of_frame": 0,
+        "keypoints_fused_multi_source": 0,
+        "keypoints_outlier_candidates_rejected": 0,
+        "sources_used_total": 0,
     }
     processed_targets = 0
     skipped_targets = 0
     batch_start_time = time.time()
     skipped_missing_source = 0
     skipped_runtime_error = 0
+    completed_work_units = 0.0
 
     for target_pos, target_image in enumerate(target_images, start=1):
+        target_work_unit_current = target_work_units[target_pos - 1] if target_work_units else 1.0
+        history_depth_current = estimate_history_depth_for_target(
+            target_pos,
+            history_mode,
+            history_size,
+        )
         if not is_batch_mode:
             print(
                 f"\nTarget {target_pos}/{len(target_images)}: "
                 f"{target_image['path'].name} (index {target_image['index']})"
             )
         try:
-            source_image, source_label_path, source_objects = select_source_image_and_objects(
+            source_definitions = collect_source_images_and_objects(
                 indexed_images,
                 labels_dir,
                 target_image["index"],
                 class_id,
                 source_object,
+                max_sources=history_size,
+                min_source_index=batch_min_source_index,
             )
+            history_depth_current = max(1, min(len(source_definitions), history_size))
+            target_work_unit_current = float(history_depth_current)
+            nearest_source = source_definitions[0]
 
             if not is_batch_mode:
-                print(
-                    "Source image: "
-                    f"{source_image['path'].name} (index {source_image['index']}) with labels {source_label_path.name}"
+                source_summary = ", ".join(
+                    f"{item['image']['path'].name}[{item['image']['index']}]"
+                    for item in source_definitions[:6]
                 )
-                print(f"Source objects selected: {len(source_objects)}")
+                if len(source_definitions) > 6:
+                    source_summary = f"{source_summary}, ... ({len(source_definitions)} total)"
+                print(
+                    "Nearest source image: "
+                    f"{nearest_source['image']['path'].name} (index {nearest_source['image']['index']}) "
+                    f"with labels {nearest_source['label_path'].name}"
+                )
+                print(f"Source frames used: {len(source_definitions)}")
+                print(f"Source frame list: {source_summary}")
+                print(f"Source objects selected (nearest frame): {len(nearest_source['objects'])}")
 
-            prev_gray = cv2.imread(str(source_image["path"]), cv2.IMREAD_GRAYSCALE)
             target_gray_raw = cv2.imread(str(target_image["path"]), cv2.IMREAD_GRAYSCALE)
-            if prev_gray is None:
-                raise RuntimeError(f"Failed to read source image: {source_image['path']}")
             if target_gray_raw is None:
                 raise RuntimeError(f"Failed to read target image: {target_image['path']}")
 
-            if prev_gray.shape != target_gray_raw.shape:
-                target_gray = cv2.resize(
-                    target_gray_raw,
-                    (prev_gray.shape[1], prev_gray.shape[0]),
-                    interpolation=cv2.INTER_LINEAR,
+            source_contexts: list[dict] = []
+            for source_def in source_definitions:
+                source_gray = cv2.imread(str(source_def["image"]["path"]), cv2.IMREAD_GRAYSCALE)
+                if source_gray is None:
+                    raise RuntimeError(f"Failed to read source image: {source_def['image']['path']}")
+                source_contexts.append(
+                    {
+                        "image": source_def["image"],
+                        "label_path": source_def["label_path"],
+                        "objects": source_def["objects"],
+                        "gray": source_gray,
+                    }
                 )
-            else:
-                target_gray = target_gray_raw
 
             predicted_lines, stats = predict_objects(
-                source_objects,
-                prev_gray,
-                target_gray,
+                source_contexts,
+                target_gray_raw,
+                target_image["index"],
                 num_keypoints,
                 lk_params,
                 backcheck_threshold,
+                history_decay,
                 show_progress=not is_batch_mode,
             )
 
@@ -511,6 +747,12 @@ def run_prediction(
                 print(f"Keypoints retry attempted: {stats['keypoints_retry_attempted']}")
                 print(f"Keypoints predicted on retry: {stats['keypoints_retry_predicted']}")
                 print(f"Keypoints kept at previous position: {stats['keypoints_kept_previous']}")
+                print(f"Keypoints fused from multi-source: {stats['keypoints_fused_multi_source']}")
+                print(
+                    "Outlier candidates rejected during fusion: "
+                    f"{stats['keypoints_outlier_candidates_rejected']}"
+                )
+                print(f"Successful source candidates used: {stats['sources_used_total']}")
                 print(
                     "Occlusion reasons: "
                     f"forward_fail={stats['forward_fail']}, "
@@ -527,12 +769,14 @@ def run_prediction(
             if not is_batch_mode:
                 print(f"Warning: skipping target {target_image['path'].name}: {target_error}")
         finally:
+            completed_work_units += target_work_unit_current
             if is_batch_mode:
+                history_tail = f"index {target_image['index']} h{history_depth_current}/{history_size}"
                 render_progress(
-                    target_pos,
-                    len(target_images),
+                    completed_work_units,
+                    total_work_units,
                     batch_start_time,
-                    f"index {target_image['index']}",
+                    history_tail,
                 )
             else:
                 render_progress(target_pos, len(target_images), batch_start_time, target_image["path"].name)
@@ -557,6 +801,12 @@ def run_prediction(
     print(f"Keypoints retry attempted: {batch_stats['keypoints_retry_attempted']}")
     print(f"Keypoints predicted on retry: {batch_stats['keypoints_retry_predicted']}")
     print(f"Keypoints kept at previous position: {batch_stats['keypoints_kept_previous']}")
+    print(f"Keypoints fused from multi-source: {batch_stats['keypoints_fused_multi_source']}")
+    print(
+        "Outlier candidates rejected during fusion: "
+        f"{batch_stats['keypoints_outlier_candidates_rejected']}"
+    )
+    print(f"Successful source candidates used: {batch_stats['sources_used_total']}")
     print(
         "Occlusion reasons: "
         f"forward_fail={batch_stats['forward_fail']}, "
@@ -569,8 +819,8 @@ def run_prediction(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Predict YOLO pose keypoints for a target image index using the nearest "
-            "previous indexed image with labels and Lucas-Kanade optical flow."
+            "Predict YOLO pose keypoints for target image index/range using "
+            "Lucas-Kanade optical flow with configurable source history scope."
         )
     )
     parser.add_argument(
@@ -597,7 +847,8 @@ def main() -> int:
         type=int,
         default=0,
         help=(
-            "Object index from previous label file (0-based) to propagate. "
+            "Object index from previous label file in newest-first order (0-based). "
+            "0 means last matching annotation line, 1 means second last. "
             "Use -1 to propagate all class-id objects. Default: 0"
         ),
     )
@@ -625,6 +876,33 @@ def main() -> int:
         default=32,
         help="LK optical-flow window size in pixels (square). Default: 32",
     )
+    parser.add_argument(
+        "--history-mode",
+        choices=["batch", "all"],
+        default="all",
+        help=(
+            "Source-frame strategy: batch=do not look backward outside current target batch; "
+            "all=always look backward. Default: all"
+        ),
+    )
+    parser.add_argument(
+        "--history-size",
+        type=int,
+        default=16,
+        help=(
+            "Max previous labeled source frames to use per target frame. "
+            "1 means previous image only. Max: 16. Default: 16"
+        ),
+    )
+    parser.add_argument(
+        "--history-decay",
+        type=float,
+        default=8.0,
+        help=(
+            "Recency decay in frames for multi-source fusion weights. "
+            "Higher means older frames keep more influence. Default: 8.0"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -642,6 +920,12 @@ def main() -> int:
             raise ValueError("--backcheck-threshold must be >= 0")
         if args.window_size <= 0:
             raise ValueError("--window-size must be > 0")
+        if args.history_size < 1:
+            raise ValueError("--history-size must be >= 1")
+        if args.history_size > 16:
+            raise ValueError("--history-size must be <= 16")
+        if args.history_decay <= 0:
+            raise ValueError("--history-decay must be > 0")
 
         cwd = Path.cwd()
         script_dir = Path(__file__).resolve().parent
@@ -661,6 +945,9 @@ def main() -> int:
             args.num_keypoints,
             args.backcheck_threshold,
             args.window_size,
+            args.history_mode,
+            args.history_size,
+            args.history_decay,
         )
         return 0
     except (FileNotFoundError, RuntimeError, ValueError) as error:
