@@ -55,7 +55,7 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
   merged labels.
 - `optimize_dataset_tiles_yolo.py`: Tile images by size/aspect into mosaics,
   rewrite YOLO labels, and copy/rescale remaining images.
-- `resize_images.py`: Resize images and optionally convert formats to JPEG with
+- `resize_images.py`: Resize images and convert formats to JPEG by default with
   progress and stats.
 - `sam3.py`: Run SAM3 text prompts on one image and export YOLO bbox labels.
 - `rename_images_labels.py`: Rename images with matching labels using a pattern

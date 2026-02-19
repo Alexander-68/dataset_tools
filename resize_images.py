@@ -179,10 +179,8 @@ def resize_images(
         print()
 
     message = f"Scanned {processed + skipped} files. Processed {processed} images."
-    if resized:
-        message += f" Resized {resized} images to max dimension {max_dim}."
-    if converted:
-        message += f" Converted {converted} images to JPEG."
+    message += f" Resized files: {resized}."
+    message += f" Format converted to JPEG: {converted}."
     if dest_dir:
         message += f" Saved to {dest_dir}."
     print(message)
@@ -214,8 +212,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--force-jpg",
+        dest="force_jpg",
         action="store_true",
-        help="Save all outputs as JPEG (.jpg), converting formats as needed.",
+        default=True,
+        help="Save all outputs as JPEG (.jpg), converting formats as needed (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-force-jpg",
+        dest="force_jpg",
+        action="store_false",
+        help="Keep original format when possible (except HEIC/HEIF which are still converted to JPEG).",
     )
 
     args = parser.parse_args()

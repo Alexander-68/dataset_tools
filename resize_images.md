@@ -6,7 +6,7 @@
 
 -   **Resizing:** Resizes images so that their longest side does not exceed a specified maximum dimension.
 -   **HEIC Support:** Converts HEIC/HEIF images to JPEG during processing.
--   **Force JPEG:** Optionally save all outputs as `.jpg` regardless of input format.
+-   **Force JPEG (Default):** Saves outputs as `.jpg` by default, converting formats as needed.
 -   **In-Place or Destination:** Can modify images in-place (overwriting originals) or save processed images to a new destination folder.
 -   **EXIF Orientation:** Respects EXIF orientation data (autorotate).
 -   **Progress + Stats:** Prints a progress bar while processing and reports total size before/after.
@@ -24,10 +24,11 @@ python resize_images.py [OPTIONS]
     -   If provided, processed images are saved to this directory. The source directory is left unchanged.
     -   If **not** provided, the script operates **in-place**. Images are resized/converted and overwritten in the source directory. **Original HEIC files are deleted** after successful conversion to JPEG in in-place mode.
 -   `--size`: The maximum dimension (width or height) for the resized images. Defaults to `1024` pixels.
--   `--force-jpg`: Save all output images as JPEG (`.jpg`), converting formats as needed. In in-place mode, non-JPEG originals are replaced.
+-   `--force-jpg`: Save all output images as JPEG (`.jpg`). This is enabled by default.
+-   `--no-force-jpg`: Keep original format when possible. HEIC/HEIF inputs are still converted to JPEG.
 
 ### Output
-At startup, the script prints what it will do and the parameter values. During processing, it shows a progress bar. When finished, it reports counts plus total size before and after (for processed images).
+At startup, the script prints what it will do and the parameter values. During processing, it shows a progress bar. When finished, it reports how many files were resized, how many were format-converted to JPEG, plus total size before and after (for processed images).
 
 ### Examples
 
@@ -55,10 +56,16 @@ python resize_images.py --source raw_photos --destination processed_photos
 python resize_images.py --size 512
 ```
 
-**5. Convert all images to JPEG while resizing:**
+**5. Convert all images to JPEG while resizing (default):**
 
 ```bash
 python resize_images.py --force-jpg
+```
+
+**6. Keep original formats when possible (no forced JPEG):**
+
+```bash
+python resize_images.py --no-force-jpg
 ```
 
 ## Paths
