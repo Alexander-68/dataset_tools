@@ -13,7 +13,9 @@ generation, label cleanup/merging, mosaics, and image preprocessing.
 
 - `annotate_images.py`: Run a YOLO pose model on images and write pose labels,
   with optional flipped inference.
-- `cleanup_labels.py`: Move label files without matching images into `labels-x`.
+- `cleanup_labels.py`: Replace spaces with underscores in `images/` and
+  `labels/`, move orphan labels to `labels-x`, and create empty labels for
+  unlabeled images.
 - `correct_keypoints.py`: Normalize person keypoint visibility flags and zero
   coordinates when invisible.
 - `correct_face_keypoints.py`: Merge improved face keypoints into pose labels
